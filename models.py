@@ -1,27 +1,12 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
+from pydantic import BaseModel, Field
 
-"""
-Data models for the Agent Skills Qa Environment.
+class AgentSkillsQaAction(BaseModel):
+    action_type: str = Field(..., description="Must be 'edit_skill' or 'submit_final'")
+    content: str = Field(..., description="The complete text of the rewritten SKILL.md file")
 
-The agent_skills_qa environment is a simple test environment that echoes back messages.
-"""
-
-from openenv.core.env_server.types import Action, Observation
-from pydantic import Field
-
-
-class AgentSkillsQaAction(Action):
-    """Action for the Agent Skills Qa environment - just a message to echo."""
-
-    message: str = Field(..., description="Message to echo back")
-
-
-class AgentSkillsQaObservation(Observation):
-    """Observation from the Agent Skills Qa environment - the echoed message."""
-
-    echoed_message: str = Field(default="", description="The echoed message")
-    message_length: int = Field(default=0, description="Length of the echoed message")
+class AgentSkillsQaObservation(BaseModel):
+    feedback: str = Field(default="", description="Parser errors or unit test results")
+    current_skill_text: str = Field(default="", description="The current state of the file")
+    done: bool = Field(default=False, description="Whether the episode has finished")
+    reward: float = Field(default=0.0, description="The score from 0.0 to 1.0")
+    metadata: dict = Field(default_factory=dict, description="Extra info")
