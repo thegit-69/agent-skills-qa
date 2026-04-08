@@ -1,115 +1,160 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-
-import random
-from uuid import uuid4
-
-from openenv.core.env_server.interfaces import Environment
-from openenv.core.env_server.types import State
-
-try:
-    from ..models import AgentSkillsQaAction, AgentSkillsQaObservation
-except ImportError:
-    from models import AgentSkillsQaAction, AgentSkillsQaObservation
-
+import yaml
+import uuid
+from openenv.core.env_server import Environment
+from ..models import AgentSkillsQaAction, AgentSkillsQaObservation, AgentSkillsQaState
 
 class AgentSkillsQaEnvironment(Environment):
-    """
-    Agent Skills QA Environment.
-    Tests an agent's ability to debug and fix SKILL.md files.
-    """
-
-    SUPPORTS_CONCURRENT_SESSIONS: bool = True
-
-    # The 3 required tasks (Easy, Medium, Hard)
-    TASKS = [
-        # Task 1 (Easy): Syntax Error - Name has spaces, description missing
-        "---\nname: PDF PROCESSOR\n# Missing description\n---\n# Instructions\nRun the tool.",
+    
+    def reset(self, task_name: str = "medium") -> AgentSkillsQaObservation:
+        self.difficulty = task_name.lower()
+        self.step_count = 0
+        self.files = {}
         
-        # Task 2 (Medium): Progressive Disclosure - Too long, needs references.md
-        "---\nname: weather-fetcher\ndescription: Fetches weather.\n---\n# Instructions\n[Pretend there are 10,000 words of heavy API documentation here that the agent needs to move to references.md]",
+        # Setup the virtual file system based on difficulty
+        if self.difficulty == "easy":
+            self.files["SKILL.md"] = "name: CalculatorSkill\nversion:1.0.0\nentrypoint: calc.py\n---\nRuns math."
+            self.files["calc.py"] = "def add(a, b): return a + b"
+            error_msg = "Initialization failed: Could not parse SKILL.md. Check YAML formatting."
+            
+        elif self.difficulty == "medium":
+            self.files["SKILL.md"] = "name: DataSkill\nversion: 1.0.0\nentrypoint: data_loader.py\n---\nLoads data."
+            error_msg = "Initialization failed: Entrypoint script referenced in SKILL.md is missing from the directory."
+            
+        else: # hard
+            self.files["SKILL.md"] = "name: MathSkill\nversion: 1.0.0\nentrypoint: script.py\n---\nAdds two numbers."
+            self.files["script.py"] = "def execute(a, b):\n    return a - b"
+            error_msg = "Initialization successful, but automated tests are failing. Use 'run_test' to debug."
+
+        self._state = AgentSkillsQaState(
+            episode_id=uuid.uuid4().hex,
+            files=self.files,
+            difficulty=self.difficulty,
+            step_count=self.step_count
+        )
         
-        # Task 3 (Hard): Logic Error - Ambiguous instructions
-        "---\nname: csv-parser\ndescription: Parses CSVs.\n---\n# Instructions\nWrite a python script to parse CSV. Don't handle missing columns."
-    ]
-
-    def __init__(self):
-        """Initialize the agent_skills_qa environment."""
-        self._state = State(episode_id=str(uuid4()), step_count=0)
-        self._reset_count = 0
-        self.current_task = ""
-
-    def reset(self) -> AgentSkillsQaObservation:
-        """
-        Reset the environment and load a new broken skill.
-        """
-        self._state = State(episode_id=str(uuid4()), step_count=0)
-        self._reset_count += 1
-        
-        # Pick a random broken skill to fix
-        self.current_task = random.choice(self.TASKS)
-
         return AgentSkillsQaObservation(
-            feedback="Welcome to Agent Skills QA. Please fix the formatting and logic in the following SKILL.md file.",
-            current_skill_text=self.current_task,
-            done=False,
-            reward=0.0,
+            message=f"Environment Started. Task: {self.difficulty.upper()}.\nSystem Alert: {error_msg}\nUse 'read_file' to inspect the directory files."
         )
 
-    def step(self, action: AgentSkillsQaAction) -> AgentSkillsQaObservation:  # type: ignore[override]
-        self._state.step_count += 1
-        reward = 0.0
-        done = False
-        feedback = ""
+    def step(self, action: AgentSkillsQaAction) -> AgentSkillsQaObservation:
+            self._state.step_count += 1
+            
+            # Prevent infinite loops
+            if self._state.step_count > 15:
+                return AgentSkillsQaObservation(
+                    message="Max steps reached. Forcing submission.", 
+                    reward=0.0, 
+                    done=True
+                )
 
-        # === GRADER LOGIC ===
-        
-        # 1. Check if the agent is just editing or submitting the final version
-        if action.action_type not in ["edit_skill", "submit_final"]:
-            feedback = f"Error: Invalid action_type '{action.action_type}'. Must be 'edit_skill' or 'submit_final'."
-            return AgentSkillsQaObservation(
-                feedback=feedback, current_skill_text=action.content, done=done, reward=0.0, metadata={"step": self._state.step_count}
-            )
+            # TOOL: Read File
+            if action.tool == "read_file":
+                if not action.filepath or action.filepath not in self._state.files:
+                    return AgentSkillsQaObservation(
+                        message=f"Error: File '{action.filepath}' not found.", 
+                        reward=0.0, 
+                        done=False
+                    )
+                return AgentSkillsQaObservation(
+                    message=f"Contents of {action.filepath}:\n\n{self._state.files[action.filepath]}", 
+                    reward=0.0, 
+                    done=False
+                )
 
-        # 2. Grade Task 2 (Progressive Disclosure)
-        if "weather-fetcher" in self.current_task:
-            # The agent should have replaced the massive text with a markdown link
-            if "[Pretend there are 10,000 words" not in action.content:
-                # Good! They removed the bloat.
-                reward += 0.3
-                feedback += "- Successfully removed bloated documentation.\n"
+            # TOOL: Write File
+            elif action.tool == "write_file":
+                if not action.filepath or not action.new_content:
+                    return AgentSkillsQaObservation(
+                        message="Error: Both filepath and new_content are required.", 
+                        reward=0.0, 
+                        done=False
+                    )
                 
-                # Check if they added a reference link
-                if "](references.md)" in action.content or "](reference.md)" in action.content:
-                    reward += 0.3
-                    feedback += "- Successfully added reference link.\n"
-                else:
-                    feedback += "- Error: You removed the text but forgot to add a markdown link to 'references.md'.\n"
+                self._state.files[action.filepath] = action.new_content
+                return AgentSkillsQaObservation(
+                    message=f"Success: '{action.filepath}' was updated/created.", 
+                    reward=0.0, 
+                    done=False
+                )
+
+            # TOOL: Run Test
+            elif action.tool == "run_test":
+                test_output = self._simulate_test_run()
+                return AgentSkillsQaObservation(
+                    message=f"Test Suite Output:\n{test_output}", 
+                    reward=0.0, 
+                    done=False
+                )
+
+            # TOOL: Submit
+            elif action.tool == "submit":
+                reward = self._calculate_reward()
+                return AgentSkillsQaObservation(
+                    message=f"Final Submission Graded. Score: {reward}", 
+                    reward=reward, 
+                    done=True
+                )
+                
             else:
-                feedback += "- Error: The SKILL.md file is still too large. You must extract the documentation.\n"
-
-        # (We will add the logic for Task 1 and Task 3 here later)
-        
-        # === END GRADER LOGIC ===
-
-        # Handle final submission
-        if action.action_type == "submit_final":
-            done = True
-            feedback += f"\nEpisode complete. Final Python Score: {reward}/0.6"
-            # (API Verification will go here later)
-        elif self._state.step_count >= 15:
-            done = True
-            feedback += "\nMax steps reached."
-
-        return AgentSkillsQaObservation(
-            feedback=feedback,
-            current_skill_text=action.content,
-            done=done,
-            reward=reward,
-            metadata={"step": self._state.step_count}
-        )
-
+                return AgentSkillsQaObservation(
+                    message="Unknown tool.", 
+                    reward=0.0, 
+                    done=False
+                )
+            
     @property
-    def state(self) -> State:
-        """Get the current environment state."""
+    def state(self) -> AgentSkillsQaState:
         return self._state
+
+    def _is_yaml_valid(self, text: str) -> bool:
+        try:
+            header = text.split("---")[0]
+            yaml.safe_load(header)
+            return True
+        except:
+            return False
+
+    def _simulate_test_run(self) -> str:
+        if "SKILL.md" not in self._state.files:
+            return "FAIL: SKILL.md is missing entirely."
+            
+        if not self._is_yaml_valid(self._state.files["SKILL.md"]):
+            return "FAIL: SKILL.md YAML header is malformed."
+            
+        if self.difficulty == "medium":
+            if "data_loader.py" not in self._state.files:
+                return "FAIL: FileNotFoundError - 'data_loader.py' not found."
+            return "PASS: All tests passed."
+            
+        if self.difficulty == "hard":
+            script_code = self._state.files.get("script.py", "")
+            if "return a + b" not in script_code and "return a+b" not in script_code:
+                return "FAIL: AssertionError in script.py - Expected execute(2, 2) to equal 4, got 0."
+            return "PASS: All tests passed."
+            
+        return "PASS: YAML is valid."
+
+    def _calculate_reward(self) -> float:
+        files = self._state.files
+        if "SKILL.md" not in files or not self._is_yaml_valid(files["SKILL.md"]):
+            return 0.0
+            
+        score = 0.4 
+        
+        if self.difficulty == "easy":
+            score = 1.0 
+            
+        elif self.difficulty == "medium":
+            if "data_loader.py" in files and len(files["data_loader.py"]) > 5:
+                score = 1.0 
+            else:
+                score = 0.5 
+                
+        elif self.difficulty == "hard":
+            script_code = files.get("script.py", "")
+            if "return a + b" in script_code or "return a+b" in script_code:
+                score = 1.0 
+            elif "script.py" in files:
+                score = 0.6 
+                
+        return score
