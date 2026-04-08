@@ -1,99 +1,44 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
+from typing import Any, Dict
+from dataclasses import dataclass
+from openenv.core.env_client import EnvClient
 
-"""Agent Skills Qa Environment Client."""
+# Import the State model as well now
+from agent_skills_qa.models import AgentSkillsQaAction, AgentSkillsQaObservation, AgentSkillsQaState
 
-from typing import Dict
+@dataclass
+class ClientResult:
+    observation: AgentSkillsQaObservation
+    reward: float
+    done: bool
+    info: dict
 
-from openenv.core import EnvClient
-from openenv.core.client_types import StepResult
-from openenv.core.env_server.types import State
-
-from .models import AgentSkillsQaAction, AgentSkillsQaObservation
-
-
-class AgentSkillsQaEnv(
-    EnvClient[AgentSkillsQaAction, AgentSkillsQaObservation, State]
-):
-    """
-    Client for the Agent Skills Qa Environment.
-
-    This client maintains a persistent WebSocket connection to the environment server,
-    enabling efficient multi-step interactions with lower latency.
-    Each client instance has its own dedicated environment session on the server.
-
-    Example:
-        >>> # Connect to a running server
-        >>> with AgentSkillsQaEnv(base_url="http://localhost:8000") as client:
-        ...     result = client.reset()
-        ...     print(result.observation.echoed_message)
-        ...
-        ...     result = client.step(AgentSkillsQaAction(message="Hello!"))
-        ...     print(result.observation.echoed_message)
-
-    Example with Docker:
-        >>> # Automatically start container and connect
-        >>> client = AgentSkillsQaEnv.from_docker_image("agent_skills_qa-env:latest")
-        >>> try:
-        ...     result = client.reset()
-        ...     result = client.step(AgentSkillsQaAction(message="Test"))
-        ... finally:
-        ...     client.close()
-    """
-
-    def _step_payload(self, action: AgentSkillsQaAction) -> Dict:
-        """
-        Convert AgentSkillsQaAction to JSON payload for step message.
-
-        Args:
-            action: AgentSkillsQaAction instance
-
-        Returns:
-            Dictionary representation suitable for JSON encoding
-        """
-        return {
-            "message": action.message,
-        }
-
-    def _parse_result(self, payload: Dict) -> StepResult[AgentSkillsQaObservation]:
-        """
-        Parse server response into StepResult[AgentSkillsQaObservation].
-
-        Args:
-            payload: JSON response data from server
-
-        Returns:
-            StepResult with AgentSkillsQaObservation
-        """
-        obs_data = payload.get("observation", {})
+# Notice we also add AgentSkillsQaState as the third generic type here instead of Any!
+class AgentSkillsQaEnv(EnvClient[AgentSkillsQaAction, AgentSkillsQaObservation, AgentSkillsQaState]):
+    
+    def _parse_result(self, data: Dict[str, Any]) -> ClientResult:
+        """Maps the raw JSON from the Docker container to our Pydantic model."""
         observation = AgentSkillsQaObservation(
-            echoed_message=obs_data.get("echoed_message", ""),
-            message_length=obs_data.get("message_length", 0),
-            done=payload.get("done", False),
-            reward=payload.get("reward"),
-            metadata=obs_data.get("metadata", {}),
+            message=data.get("message", "No message received"),
+            reward=data.get("reward", 0.0),
+            done=data.get("done", False)
         )
-
-        return StepResult(
+        return ClientResult(
             observation=observation,
-            reward=payload.get("reward"),
-            done=payload.get("done", False),
+            reward=observation.reward,
+            done=observation.done,
+            info=data.get("info", {}),
         )
 
-    def _parse_state(self, payload: Dict) -> State:
-        """
-        Parse server response into State object.
-
-        Args:
-            payload: JSON response from state request
-
-        Returns:
-            State object with episode_id and step_count
-        """
-        return State(
-            episode_id=payload.get("episode_id"),
-            step_count=payload.get("step_count", 0),
+    def _parse_state(self, data: Dict[str, Any]) -> AgentSkillsQaState:
+        """Maps the state JSON from the server into our State Pydantic model."""
+        return AgentSkillsQaState(
+            episode_id=data.get("episode_id", "unknown"),
+            files=data.get("files", {}),
+            difficulty=data.get("difficulty", "unknown"),
+            step_count=data.get("step_count", 0)
         )
+
+    def _step_payload(self, action: AgentSkillsQaAction) -> Dict[str, Any]:
+        """Converts the Pydantic action into a raw dictionary to send over the network."""
+        # .model_dump() is the Pydantic v2 way of converting a model to a dictionary
+        return action.model_dump()

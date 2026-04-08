@@ -35,12 +35,8 @@ except Exception as e:  # pragma: no cover
         "openenv is required for the web interface. Install dependencies with '\n    uv sync\n'"
     ) from e
 
-try:
-    from ..models import AgentSkillsQaAction, AgentSkillsQaObservation
-    from .agent_skills_qa_environment import AgentSkillsQaEnvironment
-except ModuleNotFoundError:
-    from models import AgentSkillsQaAction, AgentSkillsQaObservation
-    from server.agent_skills_qa_environment import AgentSkillsQaEnvironment
+from agent_skills_qa.models import AgentSkillsQaAction, AgentSkillsQaObservation
+from agent_skills_qa.server.agent_skills_qa_environment import AgentSkillsQaEnvironment
 
 
 # Create the app with web interface and README integration

@@ -6,36 +6,27 @@ import random
 from openai import OpenAI
 from openenv.core.env_server import Environment
 
-# Import from the local package so the environment works from this repository.
-try:
-    from ..models import (
-        AgentSkillsQaAction,
-        AgentSkillsQaObservation,
-        AgentSkillsQaState,
-        TASK_1_SKILL,
-        TASK_2_SKILL,
-        TASK_3_SKILL,
-        TASK_3_CODE,
-    )
-except ModuleNotFoundError:
-    from models import (
-        AgentSkillsQaAction,
-        AgentSkillsQaObservation,
-        AgentSkillsQaState,
-        TASK_1_SKILL,
-        TASK_2_SKILL,
-        TASK_3_SKILL,
-        TASK_3_CODE,
-    )
+from agent_skills_qa.models import (
+    AgentSkillsQaAction,
+    AgentSkillsQaObservation,
+    AgentSkillsQaState,
+    TASK_1_SKILL,
+    TASK_2_SKILL,
+    TASK_3_SKILL,
+    TASK_3_CODE,
+)
 
 class AgentSkillsQaEnvironment(Environment):
     SUPPORTS_CONCURRENT_SESSIONS: bool = True
 
     def reset(self) -> AgentSkillsQaObservation:
-        # Cycle through difficulties randomly to satisfy the 3-task hackathon rule
         self.difficulty = random.choice(["easy", "medium", "hard"])
         self.step_count = 0
         self.files = {}
+        
+        # --- TRACKING VARIABLES FOR REWARD SHAPING ---
+        self._read_files = set()
+        self.current_potential = 0.0 
         
         if self.difficulty == "easy":
             self.files["SKILL.md"] = TASK_1_SKILL
@@ -65,28 +56,34 @@ class AgentSkillsQaEnvironment(Environment):
     def step(self, action: AgentSkillsQaAction) -> AgentSkillsQaObservation:
         self._state.step_count += 1
         
-        # 1. INFINITE LOOP PROTECTION
         if self._state.step_count > 10:
             return AgentSkillsQaObservation(
                 message="Max steps reached. Forcing failure.", 
                 reward=0.0, done=True
             )
 
-        # 2. TOOL EXECUTION
         if action.tool == "read_file":
             if not action.filepath or action.filepath not in self._state.files:
                 return AgentSkillsQaObservation(message=f"Error: File '{action.filepath}' not found.", reward=0.0, done=False)
-            return AgentSkillsQaObservation(message=f"Contents of {action.filepath}:\n\n{self._state.files[action.filepath]}", reward=0.0, done=False)
+            
+            self._read_files.add(action.filepath)
+            reward, msg = self._process_dynamic_reward(f"Contents of {action.filepath}:\n\n{self._state.files[action.filepath]}")
+            return AgentSkillsQaObservation(message=msg, reward=reward, done=False)
 
         elif action.tool == "write_file":
-            if not action.filepath or not action.new_content:
+            if not action.filepath or action.new_content is None:
                 return AgentSkillsQaObservation(message="Error: Missing filepath or new_content.", reward=0.0, done=False)
+            
             self._state.files[action.filepath] = action.new_content
-            return AgentSkillsQaObservation(message=f"Success: '{action.filepath}' saved.", reward=0.0, done=False)
+            reward, msg = self._process_dynamic_reward(f"Success: '{action.filepath}' saved.")
+            return AgentSkillsQaObservation(message=msg, reward=reward, done=False)
 
         elif action.tool == "submit":
-            feedback, reward = self._calculate_reward()
-            return AgentSkillsQaObservation(message=f"FINAL GRADE: {feedback}", reward=reward, done=True)
+            final_grade, feedback = self._calculate_final_grade()
+            # The submit reward is exactly what's left over from the partial rewards
+            submit_reward = max(0.0, final_grade - self.current_potential)
+            self.current_potential = final_grade
+            return AgentSkillsQaObservation(message=f"FINAL GRADE: {feedback} (Score: {final_grade})", reward=submit_reward, done=True)
             
         else:
             return AgentSkillsQaObservation(message="Unknown tool.", reward=0.0, done=False)
@@ -96,55 +93,91 @@ class AgentSkillsQaEnvironment(Environment):
         return self._state
 
     # ---------------------------------------------------------
-    # THE GRADING LOGIC (The core of the hackathon)
+    # POTENTIAL-BASED REWARD SHAPING (Blocks Reward Hacking)
     # ---------------------------------------------------------
-    def _calculate_reward(self) -> tuple[str, float]:
-        files = self._state.files
-        if "SKILL.md" not in files:
-            return "FAIL: SKILL.md was deleted.", 0.0
+    def _process_dynamic_reward(self, base_message: str) -> tuple[float, str]:
+        """Calculates the current 'potential' of the environment and awards the delta."""
+        new_potential = self._calculate_current_potential()
+        delta_reward = max(0.0, new_potential - self.current_potential)
+        
+        if delta_reward > 0:
+            self.current_potential = new_potential
+            return delta_reward, f"{base_message}\n[Partial Progress Reward: +{delta_reward:.2f}]"
+        
+        return 0.0, base_message
 
-        # --- TASK 1: THE REGEX/YAML GRADER (HACK-PROOF) ---
-        if self.difficulty == "easy":
+    def _calculate_current_potential(self) -> float:
+        """Evaluates how close the files are to the final goal (Returns 0.0 to 0.8)"""
+        potential = 0.0
+        files = self._state.files
+
+        # 1. Reward for exploring (reading files at least once)
+        if len(self._read_files) > 0:
+            potential += 0.1
+
+        # 2. TASK 1 DYNAMICS (Regex live-checking)
+        if self.difficulty == "easy" and "SKILL.md" in files:
             text = files["SKILL.md"]
             yaml_match = re.search(r'^---\n(.*?)\n---', text, re.DOTALL | re.MULTILINE)
-            if not yaml_match:
-                return "FAIL: Invalid YAML formatting.", 0.0
-            try:
-                frontmatter = yaml.safe_load(yaml_match.group(1))
-                name = frontmatter.get('name', '')
-                if not re.match(r'^[a-z0-9\-]+$', name) or "claude" in name:
-                    return f"FAIL: Name '{name}' breaks character or reserved word rules.", 0.5
-                return "PASS: YAML frontmatter is perfect.", 1.0
-            except:
-                return "FAIL: YAML parser crashed.", 0.0
+            if yaml_match:
+                potential += 0.2  # Valid YAML block exists
+                try:
+                    frontmatter = yaml.safe_load(yaml_match.group(1))
+                    name = frontmatter.get('name', '')
+                    if name and len(name) <= 64:
+                        potential += 0.2
+                    if name and re.match(r'^[a-z0-9\-]+$', name) and "claude" not in name:
+                        potential += 0.3
+                except: pass
 
-        # --- TASK 2: PROGRESSIVE DISCLOSURE GRADER ---
+        # 3. TASK 2 DYNAMICS (Progressive Disclosure)
         elif self.difficulty == "medium":
-            if "schema.md" not in files:
-                return "FAIL: You did not create schema.md.", 0.2
-            if "schema.md" not in files["SKILL.md"].lower():
-                return "FAIL: schema.md was created, but not linked in SKILL.md.", 0.6
-            if "object" in files["SKILL.md"]:
-                return "FAIL: You forgot to remove the schema from SKILL.md.", 0.8
-            return "PASS: Progressive Disclosure implemented perfectly.", 1.0
+            if "schema.md" in files:
+                potential += 0.3
+            if "SKILL.md" in files and "schema.md" in files["SKILL.md"].lower():
+                potential += 0.2
+            if "SKILL.md" in files and "object" not in files["SKILL.md"]:
+                potential += 0.2
 
-        # --- TASK 3: THE LLM JUDGE (SEMANTIC GRADER) ---
+        # 4. TASK 3 DYNAMICS (Light static analysis to save API calls)
         elif self.difficulty == "hard":
             code = files.get("script.py", "")
-            if "pass" in code or "timeout = 47" in code:
-                return "FAIL: You left the magic number or lazy exception in the code.", 0.3
-            
-            # The Ultimate "Valid Signal" - Calling the LLM to grade the code logic
+            if code:
+                if "47" not in code:
+                    potential += 0.3
+                if "pass" not in code:
+                    potential += 0.4
+                    
+        # Cap potential at 0.8. The last 0.2 is strictly reserved for clicking "submit".
+        return min(potential, 0.8)
+
+    # ---------------------------------------------------------
+    # FINAL GRADING LOGIC
+    # ---------------------------------------------------------
+    def _calculate_final_grade(self) -> tuple[float, str]:
+        files = self._state.files
+        if "SKILL.md" not in files:
+            return 0.0, "FAIL: SKILL.md was deleted."
+
+        if self.difficulty == "easy":
+            if self._calculate_current_potential() >= 0.8:
+                return 1.0, "PASS: YAML frontmatter is perfect."
+            return self.current_potential, "FAIL: Formatting rules violated."
+
+        elif self.difficulty == "medium":
+            if self._calculate_current_potential() >= 0.8:
+                return 1.0, "PASS: Progressive Disclosure implemented perfectly."
+            return self.current_potential, "FAIL: Schema not correctly extracted and linked."
+
+        elif self.difficulty == "hard":
+            code = files.get("script.py", "")
+            # Final LLM Evaluation only runs on submit to save 20min timeout limits
             llm_score = self._run_llm_judge(code)
-            if llm_score >= 0.9:
-                return f"PASS: LLM Judge approved the code quality (Score: {llm_score}).", 1.0
-            else:
-                return f"FAIL: LLM Judge found logical flaws (Score: {llm_score}).", llm_score
-                
-        return "ERROR: Unknown state.", 0.0
+            return llm_score, "LLM Judge Evaluation complete."
+            
+        return 0.0, "ERROR: Unknown state."
 
     def _run_llm_judge(self, code: str) -> float:
-        """Acts as the Semantic Grader to prevent brittle regex hacks."""
         try:
             client = OpenAI(
                 base_url=os.getenv("API_BASE_URL", "https://router.huggingface.co/v1"),
@@ -159,10 +192,8 @@ class AgentSkillsQaEnvironment(Environment):
                 max_tokens=10
             )
             score_text = response.choices[0].message.content.strip()
-            # Extract the float using regex just in case the LLM yaps
             match = re.search(r'0\.\d+|1\.0', score_text)
             return float(match.group()) if match else 0.5
         except Exception as e:
             print(f"LLM Judge Failed: {e}")
-            # Fallback heuristic if network fails during judging
             return 0.8 if "Exception" in code else 0.4
