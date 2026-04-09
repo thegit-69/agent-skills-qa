@@ -1,255 +1,132 @@
+```markdown
 ---
-title: Agent Skills Qa Environment Server
-emoji: 🖨️
-colorFrom: red
-colorTo: gray
+title: Agent Skills QA Environment
+emoji: 🛠️
+colorFrom: blue
+colorTo: green
 sdk: docker
 pinned: false
 app_port: 8000
 base_path: /web
 tags:
   - openenv
+  - reinforcement-learning
+  - agents
+---
+```
+# Agent Skills QA Environment
+
+A Reinforcement Learning sandbox designed to evaluate an LLM agent's ability to act as a Software Engineer. The agent is placed in an environment with broken Claude Agent `SKILL.md` or Python script files and must use file-system tools to read, debug, and fix them.
+
+Features a mathematically robust **Potential-Based Reward System** to guide agents without succumbing to reward-hacking, and a strict absolute grader for final evaluation.
+
+## 🎯 The Tasks (Auto-Randomized on Reset)
+1. **Easy (YAML Validation):** The agent must read `SKILL.md`, detect illegal naming conventions (uppercase, reserved words like 'claude', length limits), and rewrite the frontmatter correctly.
+2. **Medium (Progressive Disclosure):** The agent must read a bloated `SKILL.md`, extract a large JSON schema into a new `schema.md` file, and update the original file to link to it.
+3. **Hard (Code Debugging):** The agent must read `script.py`, remove magic numbers (e.g., hardcoded timeouts), and fix lazy `except: pass` error handling. Evaluated dynamically by a `Qwen2.5-72B-Instruct` LLM Judge.
+
 ---
 
-# Agent Skills Qa Environment
+## 🚀 Quick Start (Local Inference)
 
-A simple test environment that echoes back messages. Perfect for testing the env APIs as well as demonstrating environment usage patterns.
+The easiest way to test the environment is using the pre-configured baseline script. 
 
-## Quick Start
+1. Create a `.env` file in the root directory with your Hugging Face token (required for the Hard Task's LLM Judge):
+   ```env
+   HF_TOKEN=your_hf_token_here
+   LOCAL_IMAGE_NAME=agent_skills_image:latest
+   ```
 
-The simplest way to use the Agent Skills Qa environment is through the `AgentSkillsQaEnv` class:
+2. Build the Docker image (Note: The Dockerfile is in the root directory):
+   ```bash
+   docker build -t agent_skills_image:latest .
+   ```
 
-```python
-from agent_skills_qa import AgentSkillsQaAction, AgentSkillsQaEnv
+3. Run the baseline agent:
+   ```bash
+   uv run python inference.py
+   ```
 
-try:
-    # Create environment from Docker image
-    agent_skills_qaenv = AgentSkillsQaEnv.from_docker_image("agent_skills_qa-env:latest")
+---
 
-    # Reset
-    result = agent_skills_qaenv.reset()
-    print(f"Reset: {result.observation.echoed_message}")
+## 🛠️ Environment Details
 
-    # Send multiple messages
-    messages = ["Hello, World!", "Testing echo", "Final message"]
+### Action Schema (`AgentSkillsQaAction`)
+The agent interacts with the environment using exactly 3 tools:
+- `tool` (str): Must be `"read_file"`, `"write_file"`, or `"submit"`.
+- `filepath` (str, optional): The target file (e.g., `"SKILL.md"`).
+- `new_content` (str, optional): The new text to save when using `write_file`.
 
-    for msg in messages:
-        result = agent_skills_qaenv.step(AgentSkillsQaAction(message=msg))
-        print(f"Sent: '{msg}'")
-        print(f"  → Echoed: '{result.observation.echoed_message}'")
-        print(f"  → Length: {result.observation.message_length}")
-        print(f"  → Reward: {result.reward}")
+### Observation Schema (`AgentSkillsQaObservation`)
+- `message` (str): Text feedback from the environment (e.g., file contents, success messages, or error warnings).
+- `reward` (float): The partial reward earned on this specific step.
+- `done` (bool): `True` if the agent submits or hits the step limit.
 
-finally:
-    # Always clean up
-    agent_skills_qaenv.close()
+### Reward Shaping (Anti-Hack System)
+Rewards are awarded using a Potential-Based delta system (Total max score = `1.0`).
+- **Exploration:** `+0.10` for successfully reading a file.
+- **Partial Progress:** Variable rewards (up to `0.70`) for writing correct code fixes to the files.
+- **Submission:** The final `+0.20` is strictly reserved for calling the `submit` tool. 
+- *Note: Spamming tools or rewriting broken code recalculates potential and strictly returns `0.00`.*
+
+---
+
+## 🧪 Development & Testing
+
+We provide dedicated scripts to test both the real-time Environment (Phase 1) and the final Grader (Phase 2).
+
+### 1. Test the Evaluation Grader Locally
+Ensure your absolute grader logic mathematically aligns with the environment constraints without waiting for cloud pipelines:
+```bash
+uv run python test_grader.py
 ```
 
-That's it! The `AgentSkillsQaEnv.from_docker_image()` method handles:
-- Starting the Docker container
-- Waiting for the server to be ready
-- Connecting to the environment
-- Container cleanup when you call `close()`
+### 2. Manual Human-in-the-Loop Testing
+Play the game yourself via the terminal to test reward limits and edge cases:
+```bash
+# Start the container with your secrets
+docker run --name my_agent_env -p 8000:8000 --env-file .env agent_skills_image:latest
 
-## Building the Docker Image
+# In a new terminal, run the interactive prompt
+uv run python human_test.py
+```
 
-Before using the environment, you need to build the Docker image:
+### 3. OpenEnv UI
+When the Docker container is running, navigate to `http://localhost:8000/web` in your browser to use the graphical OpenEnv testing sandbox.
+
+---
+
+## ☁️ Deploying to Hugging Face Spaces
+
+You can easily deploy your OpenEnv environment to Hugging Face Spaces using the OpenEnv CLI. This automatically packages the environment, sets up the FastAPI server, and exposes the required evaluation endpoints.
 
 ```bash
-# From project root
-docker build -t agent_skills_qa-env:latest -f server/Dockerfile .
+# Validate your openenv.yaml configuration
+uv run openenv validate
+
+# Push to your Hugging Face Space
+uv run openenv push --repo-id <your-hf-username>/<your-space-name>
 ```
 
-## Deploying to Hugging Face Spaces
+---
 
-You can easily deploy your OpenEnv environment to Hugging Face Spaces using the `openenv push` command:
+## 📁 Project Structure
 
-```bash
-# From the environment directory (where openenv.yaml is located)
-openenv push
-
-# Or specify options
-openenv push --namespace my-org --private
-```
-
-The `openenv push` command will:
-1. Validate that the directory is an OpenEnv environment (checks for `openenv.yaml`)
-2. Prepare a custom build for Hugging Face Docker space (enables web interface)
-3. Upload to Hugging Face (ensuring you're logged in)
-
-### Prerequisites
-
-- Authenticate with Hugging Face: The command will prompt for login if not already authenticated
-
-### Options
-
-- `--directory`, `-d`: Directory containing the OpenEnv environment (defaults to current directory)
-- `--repo-id`, `-r`: Repository ID in format 'username/repo-name' (defaults to 'username/env-name' from openenv.yaml)
-- `--base-image`, `-b`: Base Docker image to use (overrides Dockerfile FROM)
-- `--private`: Deploy the space as private (default: public)
-
-### Examples
-
-```bash
-# Push to your personal namespace (defaults to username/env-name from openenv.yaml)
-openenv push
-
-# Push to a specific repository
-openenv push --repo-id my-org/my-env
-
-# Push with a custom base image
-openenv push --base-image ghcr.io/meta-pytorch/openenv-base:latest
-
-# Push as a private space
-openenv push --private
-
-# Combine options
-openenv push --repo-id my-org/my-env --base-image custom-base:latest --private
-```
-
-After deployment, your space will be available at:
-`https://huggingface.co/spaces/<repo-id>`
-
-The deployed space includes:
-- **Web Interface** at `/web` - Interactive UI for exploring the environment
-- **API Documentation** at `/docs` - Full OpenAPI/Swagger interface
-- **Health Check** at `/health` - Container health monitoring
-- **WebSocket** at `/ws` - Persistent session endpoint for low-latency interactions
-
-## Environment Details
-
-### Action
-**AgentSkillsQaAction**: Contains a single field
-- `message` (str) - The message to echo back
-
-### Observation
-**AgentSkillsQaObservation**: Contains the echo response and metadata
-- `echoed_message` (str) - The message echoed back
-- `message_length` (int) - Length of the message
-- `reward` (float) - Reward based on message length (length × 0.1)
-- `done` (bool) - Always False for echo environment
-- `metadata` (dict) - Additional info like step count
-
-### Reward
-The reward is calculated as: `message_length × 0.1`
-- "Hi" → reward: 0.2
-- "Hello, World!" → reward: 1.3
-- Empty message → reward: 0.0
-
-## Advanced Usage
-
-### Connecting to an Existing Server
-
-If you already have a Agent Skills Qa environment server running, you can connect directly:
-
-```python
-from agent_skills_qa import AgentSkillsQaEnv
-
-# Connect to existing server
-agent_skills_qaenv = AgentSkillsQaEnv(base_url="<ENV_HTTP_URL_HERE>")
-
-# Use as normal
-result = agent_skills_qaenv.reset()
-result = agent_skills_qaenv.step(AgentSkillsQaAction(message="Hello!"))
-```
-
-Note: When connecting to an existing server, `agent_skills_qaenv.close()` will NOT stop the server.
-
-### Using the Context Manager
-
-The client supports context manager usage for automatic connection management:
-
-```python
-from agent_skills_qa import AgentSkillsQaAction, AgentSkillsQaEnv
-
-# Connect with context manager (auto-connects and closes)
-with AgentSkillsQaEnv(base_url="http://localhost:8000") as env:
-    result = env.reset()
-    print(f"Reset: {result.observation.echoed_message}")
-    # Multiple steps with low latency
-    for msg in ["Hello", "World", "!"]:
-        result = env.step(AgentSkillsQaAction(message=msg))
-        print(f"Echoed: {result.observation.echoed_message}")
-```
-
-The client uses WebSocket connections for:
-- **Lower latency**: No HTTP connection overhead per request
-- **Persistent session**: Server maintains your environment state
-- **Efficient for episodes**: Better for many sequential steps
-
-### Concurrent WebSocket Sessions
-
-The server supports multiple concurrent WebSocket connections. To enable this,
-modify `server/app.py` to use factory mode:
-
-```python
-# In server/app.py - use factory mode for concurrent sessions
-app = create_app(
-    AgentSkillsQaEnvironment,  # Pass class, not instance
-    AgentSkillsQaAction,
-    AgentSkillsQaObservation,
-    max_concurrent_envs=4,  # Allow 4 concurrent sessions
-)
-```
-
-Then multiple clients can connect simultaneously:
-
-```python
-from agent_skills_qa import AgentSkillsQaAction, AgentSkillsQaEnv
-from concurrent.futures import ThreadPoolExecutor
-
-def run_episode(client_id: int):
-    with AgentSkillsQaEnv(base_url="http://localhost:8000") as env:
-        result = env.reset()
-        for i in range(10):
-            result = env.step(AgentSkillsQaAction(message=f"Client {client_id}, step {i}"))
-        return client_id, result.observation.message_length
-
-# Run 4 episodes concurrently
-with ThreadPoolExecutor(max_workers=4) as executor:
-    results = list(executor.map(run_episode, range(4)))
-```
-
-## Development & Testing
-
-### Direct Environment Testing
-
-Test the environment logic directly without starting the HTTP server:
-
-```bash
-# From the server directory
-python3 server/agent_skills_qa_environment.py
-```
-
-This verifies that:
-- Environment resets correctly
-- Step executes actions properly
-- State tracking works
-- Rewards are calculated correctly
-
-### Running Locally
-
-Run the server locally for development:
-
-```bash
-uvicorn server.app:app --reload
-```
-
-## Project Structure
-
-```
+```text
 agent_skills_qa/
-├── .dockerignore         # Docker build exclusions
-├── __init__.py            # Module exports
-├── README.md              # This file
-├── openenv.yaml           # OpenEnv manifest
-├── pyproject.toml         # Project metadata and dependencies
-├── uv.lock                # Locked dependencies (generated)
-├── client.py              # AgentSkillsQaEnv client
-├── models.py              # Action and Observation models
+├── Dockerfile                  # Container image definition (Root level)
+├── openenv.yaml                # OpenEnv Hackathon manifest
+├── pyproject.toml              # Dependencies
+├── .env                        # Local secrets (Not tracked in git)
+├── client.py                   # Pydantic <-> JSON Translator
+├── models.py                   # Action and Observation Pydantic models
+├── inference.py                # Baseline Qwen2.5 Agent loop
 └── server/
-    ├── __init__.py        # Server module exports
-    ├── agent_skills_qa_environment.py  # Core environment logic
-    ├── app.py             # FastAPI application (HTTP + WebSocket endpoints)
-    └── Dockerfile         # Container image definition
+    ├── app.py                  # FastAPI application & entry point
+    ├── agent_skills_qa_environment.py  # Core Environment (The Teacher)
+    └── grader.py               # Absolute Final Exam Grader (Phase 2)
 ```
+
+# Contributions
+
+### This project is done by **Dasarath C** and **Rohan V** for the Round-1 submission of Open-env hackathon conducted by Scalar school of technology.
