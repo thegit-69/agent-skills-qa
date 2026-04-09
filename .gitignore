@@ -44,3 +44,5 @@ Thumbs.db
 .dockerignore
 
 sample_inference_script.py
+test_grader.py
+human_test.py

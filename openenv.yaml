@@ -1,7 +1,28 @@
+version: "1.0"
 spec_version: 1
-name: agent_skills_qa
+name: "agent_skills_qa"
+description: "Fixing broken Claude Agent SKILL.md files."
 type: space
 runtime: fastapi
-app: server.app:app
+# ADDED PACKAGE NAME HERE:
+app: agent_skills_qa.server.app:app
 port: 8000
-
+tasks:
+  - id: "task_1_easy"
+    name: "YAML Frontmatter Fix"
+    description: "Fix the YAML frontmatter in SKILL.md."
+    difficulty: "easy"
+    # ADDED PACKAGE NAME HERE:
+    grader: "agent_skills_qa.server.grader:grade_easy"
+  - id: "task_2_medium"
+    name: "Progressive Disclosure"
+    description: "Implement Progressive Disclosure by extracting the schema."
+    difficulty: "medium"
+    # ADDED PACKAGE NAME HERE:
+    grader: "agent_skills_qa.server.grader:grade_medium"
+  - id: "task_3_hard"
+    name: "Fix Magic Numbers"
+    description: "Remove magic numbers and fix lazy error handling."
+    difficulty: "hard"
+    # ADDED PACKAGE NAME HERE:
+    grader: "agent_skills_qa.server.grader:grade_hard"

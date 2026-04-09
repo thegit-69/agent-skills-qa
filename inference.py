@@ -16,7 +16,7 @@ API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
 MODEL_NAME = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
 TASK_NAME = os.getenv("agent_skills_qa_TASK", "agent_skills_qa")
 BENCHMARK = os.getenv("agent_skills_qa_BENCHMARK", "agent_skills_qa")
-IMAGE_NAME = os.getenv("IMAGE_NAME", "agent_skills_image:latest")
+LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME", "agent_skills_image:latest")
 
 MAX_STEPS = 10
 TEMPERATURE = 0.2
@@ -108,7 +108,7 @@ def get_model_action(client: OpenAI, step: int, last_feedback: str, history: Lis
 
 async def main() -> None:
     client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
-    env = await AgentSkillsQaEnv.from_docker_image(IMAGE_NAME)
+    env = await AgentSkillsQaEnv.from_docker_image(LOCAL_IMAGE_NAME)
     history: List[str] = []
     rewards: List[float] = []
     steps_taken = 0
