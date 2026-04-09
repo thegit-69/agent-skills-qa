@@ -11,7 +11,7 @@ from openai import OpenAI
 from agent_skills_qa.client import AgentSkillsQaEnv
 from agent_skills_qa.models import AgentSkillsQaAction
 
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
+HF_TOKEN = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
 MODEL_NAME = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
 TASK_NAME = os.getenv("agent_skills_qa_TASK", "agent_skills_qa")
@@ -107,7 +107,7 @@ def get_model_action(client: OpenAI, step: int, last_feedback: str, history: Lis
         return AgentSkillsQaAction(tool="submit"), raw_text
 
 async def main() -> None:
-    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+    client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
     env = await AgentSkillsQaEnv.from_docker_image(LOCAL_IMAGE_NAME)
     history: List[str] = []
     rewards: List[float] = []
