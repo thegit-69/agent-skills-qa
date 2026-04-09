@@ -46,3 +46,5 @@ Thumbs.db
 sample_inference_script.py
 test_grader.py
 human_test.py
+pre_validation_script.sh
+results.md
