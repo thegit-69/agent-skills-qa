@@ -19,8 +19,12 @@ from agent_skills_qa.models import (
 class AgentSkillsQaEnvironment(Environment):
     SUPPORTS_CONCURRENT_SESSIONS: bool = True
 
-    def reset(self) -> AgentSkillsQaObservation:
-        self.difficulty = random.choice(["easy", "medium", "hard"])
+    def reset(self, task: str | None = None, **kwargs) -> AgentSkillsQaObservation:
+        requested_task = (task or "").strip().lower()
+        if requested_task in {"easy", "medium", "hard"}:
+            self.difficulty = requested_task
+        else:
+            self.difficulty = random.choice(["easy", "medium", "hard"])
         self.step_count = 0
         self.files = {}
         
