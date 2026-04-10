@@ -8,19 +8,19 @@ runtime: fastapi
 app: agent_skills_qa.server.app:app
 port: 8000
 tasks:
-  - id: "task_1_easy"
+  - id: "easy"
     name: "YAML Frontmatter Fix"
     description: "Fix the YAML frontmatter in SKILL.md."
     difficulty: "easy"
     # ADDED PACKAGE NAME HERE:
     grader: "agent_skills_qa.server.grader:grade_easy"
-  - id: "task_2_medium"
+  - id: "medium"
     name: "Progressive Disclosure"
     description: "Implement Progressive Disclosure by extracting the schema."
     difficulty: "medium"
     # ADDED PACKAGE NAME HERE:
     grader: "agent_skills_qa.server.grader:grade_medium"
-  - id: "task_3_hard"
+  - id: "hard"
     name: "Fix Magic Numbers"
     description: "Remove magic numbers and fix lazy error handling."
     difficulty: "hard"
