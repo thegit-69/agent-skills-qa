@@ -26,6 +26,7 @@ ARG ENV_NAME=agent_skills_qa
 
 # Copy environment code (always at root of build context)
 COPY . /app/env
+COPY README.md .
 
 # For in-repo builds, openenv is already vendored in the build context
 # For standalone builds, openenv will be installed via pyproject.toml
